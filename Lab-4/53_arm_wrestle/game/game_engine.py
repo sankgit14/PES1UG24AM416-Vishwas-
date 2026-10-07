@@ -18,7 +18,13 @@ class GameEngine:
         
         self.winner = None
         self.game_state = "PLAYING"
-        self.ai_strength = 0.35  
+        self.ai_strength = 0.35
+        self.ai_state = "NORMAL"
+        self.ai_state_start = pygame.time.get_ticks()
+
+        self.ai_normal_duration = 5000
+        self.ai_surge_duration = 2000
+        self.ai_cooldown_duration = 3000
         
         self.font_big = pygame.font.SysFont(None, 44)
         self.font_med = pygame.font.SysFont(None, 26)
@@ -48,8 +54,33 @@ class GameEngine:
         if self.game_state != "PLAYING":
             return
 
+        current_time = pygame.time.get_ticks()
+        elapsed = current_time - self.ai_state_start
+
+        if self.ai_state == "NORMAL":
+            if elapsed >= self.ai_normal_duration:
+                self.ai_state = "SURGE"
+                self.ai_state_start = current_time
+
+        elif self.ai_state == "SURGE":
+            if elapsed >= self.ai_surge_duration:
+                self.ai_state = "COOLDOWN"
+                self.ai_state_start = current_time
+
+        elif self.ai_state == "COOLDOWN":
+            if elapsed >= self.ai_cooldown_duration:
+                self.ai_state = "NORMAL"
+                self.ai_state_start = current_time
+
+        if self.ai_state == "SURGE":
+            ai_force = self.ai_strength * 2.0
+        elif self.ai_state == "COOLDOWN":
+            ai_force = self.ai_strength * 0.25
+        else:
+            ai_force = self.ai_strength
+
         ai_variance = random.uniform(0.3, 1.0)
-        self.arm_position += self.ai_strength * ai_variance
+        self.arm_position += ai_force * ai_variance
 
         if self.stamina < self.max_stamina:
             self.stamina = min(self.max_stamina, self.stamina + 0.8)
@@ -67,6 +98,8 @@ class GameEngine:
         self.last_key = None
         self.winner = None
         self.game_state = "PLAYING"
+        self.ai_state = "NORMAL"
+        self.ai_state_start = pygame.time.get_ticks()
 
     def render(self, screen):
         screen.fill((25, 28, 35))
