@@ -29,6 +29,8 @@ class GameEngine:
         self.ai_normal_duration = 5000
         self.ai_surge_duration = 2000
         self.ai_cooldown_duration = 3000
+        self.counter_surge_timer = 0
+        self.counter_surge_duration = 1500
 
         self.font_big = pygame.font.SysFont(None, 44)
         self.font_med = pygame.font.SysFont(None, 26)
@@ -46,20 +48,36 @@ class GameEngine:
                 self.exhausted = True
                 return
 
-            if event.key == pygame.K_LEFT:
-                if self.last_key != pygame.K_LEFT:
-                    self.arm_position -= 4.2
-                    self.stamina = max(0.0, self.stamina - 2.0)
-                    self.last_key = pygame.K_LEFT
+            if self.last_key != pygame.K_LEFT:
+                push_strength = 4.2
 
-                    if self.stamina <= 10:
+                if self.counter_surge_timer > 0:
+                    push_strength *= 2.0
+                    self.stamina = min(
+                        self.max_stamina,
+                        self.stamina + 4.0
+                    )
+
+                self.arm_position -= push_strength
+                self.stamina = max(0.0, self.stamina - 2.0)
+                self.last_key = pygame.K_LEFT
+
+                if self.stamina <= 10:
                         self.exhausted = True
+                elif event.key == pygame.K_RIGHT:
+                    if self.last_key != pygame.K_RIGHT:
+                        push_strength = 4.2
 
-            elif event.key == pygame.K_RIGHT:
-                if self.last_key != pygame.K_RIGHT:
-                    self.arm_position -= 4.2
-                    self.stamina = max(0.0, self.stamina - 2.0)
-                    self.last_key = pygame.K_RIGHT
+                        if self.counter_surge_timer > 0:
+                            push_strength *= 2.0
+                            self.stamina = min(
+                                self.max_stamina,
+                                self.stamina + 4.0
+                            )
+
+                        self.arm_position -= push_strength
+                        self.stamina = max(0.0, self.stamina - 2.0)
+                        self.last_key = pygame.K_RIGHT
 
                     if self.stamina <= 10:
                         self.exhausted = True
@@ -73,16 +91,21 @@ class GameEngine:
         # -----------------------------
         current_time = pygame.time.get_ticks()
         elapsed = current_time - self.ai_state_start
+        if self.counter_surge_timer > 0:
+            self.counter_surge_timer -= 16
+            self.counter_surge_timer = max(0, self.counter_surge_timer)
 
         if self.ai_state == "NORMAL":
             if elapsed >= self.ai_normal_duration:
                 self.ai_state = "SURGE"
                 self.ai_state_start = current_time
-
         elif self.ai_state == "SURGE":
             if elapsed >= self.ai_surge_duration:
                 self.ai_state = "COOLDOWN"
                 self.ai_state_start = current_time
+
+                # Give the player a short counter-surge opportunity
+                self.counter_surge_timer = self.counter_surge_duration
 
         elif self.ai_state == "COOLDOWN":
             if elapsed >= self.ai_cooldown_duration:
