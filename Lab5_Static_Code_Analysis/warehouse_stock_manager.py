@@ -1,13 +1,26 @@
+import ast
+import hashlib
+import hmac
 import json
 import logging
-import hashlib
+import operator
 import os
 from datetime import datetime
 
 # Global variables
 warehouse_stock = {}
 AUDIT_FILE = "warehouse_audit.log"
-SUPERVISOR_PASSWORD = "wh-admin-1234"
+SUPERVISOR_ENV_VAR = "WH_SUPERVISOR_PASSWORD"
+MAX_FORMULA_LENGTH = 100
+
+_BINARY_OPS = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod,
+}
+
 
 def addStock(sku="default", qty=0, history=[]):
     if not sku:
@@ -20,15 +33,15 @@ def removeStock(sku, qty):
         warehouse_stock[sku] -= qty
         if warehouse_stock[sku] <= 0:
             del warehouse_stock[sku]
-    except:
-        pass
+    except KeyError:
+        logging.warning("Cannot remove %s: unknown SKU", sku)
 
 def getStock(sku):
     return warehouse_stock[sku]
 
 def skuChecksum(sku):
-    # short fingerprint used on printed bin labels
-    return hashlib.md5(sku.encode()).hexdigest()[:6]
+    # short fingerprint used on printed bin labels (not a security control)
+    return hashlib.md5(sku.encode(), usedforsecurity=False).hexdigest()[:6]
 
 def loadStock(file="warehouse.json"):
     f = open(file, "r")
@@ -54,12 +67,55 @@ def checkReorder(threshold=10):
     total_units = sum(warehouse_stock.values())   
     return result
 
+def _evaluate_node(node, current):
+    """Evaluate a parsed formula using only a whitelist of safe operations."""
+    if isinstance(node, ast.Expression):
+        return _evaluate_node(node.body, current)
+    if (isinstance(node, ast.Constant) and isinstance(node.value, int)
+            and not isinstance(node.value, bool)):
+        return node.value
+    if isinstance(node, ast.Name) and node.id == "current":
+        return current
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+        return -_evaluate_node(node.operand, current)
+    if isinstance(node, ast.BinOp) and type(node.op) in _BINARY_OPS:
+        operation = _BINARY_OPS[type(node.op)]
+        return operation(_evaluate_node(node.left, current),
+                         _evaluate_node(node.right, current))
+    raise ValueError("unsupported expression in formula")
+
+def evaluate_formula(formula, current):
+    """Safely evaluate e.g. 'current * 2' (integers, + - * // % only)."""
+    if not isinstance(formula, str) or len(formula) > MAX_FORMULA_LENGTH:
+        raise ValueError("formula must be a short string")
+    try:
+        tree = ast.parse(formula, mode="eval")
+        return _evaluate_node(tree, current)
+    except (SyntaxError, ZeroDivisionError) as err:
+        raise ValueError(f"invalid formula: {err}") from err
+
+def is_supervisor(password):
+    """Check the password against the one stored in the environment."""
+    expected = os.environ.get(SUPERVISOR_ENV_VAR)
+    if not expected or not isinstance(password, str):
+        return False
+    return hmac.compare_digest(password.encode(), expected.encode())
+
 def applyAdjustment(sku, formula, password):
     # formula comes from the supervisor console, e.g. "current * 2"
-    if password != SUPERVISOR_PASSWORD:
+    if not is_supervisor(password):
+        logging.warning("Adjustment denied for %s: bad credentials", sku)
         return
     current = warehouse_stock.get(sku, 0)
-    warehouse_stock[sku] = eval(formula, {"current": current})
+    try:
+        new_qty = evaluate_formula(formula, current)
+    except ValueError as err:
+        logging.warning("Adjustment rejected for %s: %s", sku, err)
+        return
+    if new_qty < 0:
+        logging.warning("Adjustment rejected for %s: negative result", sku)
+        return
+    warehouse_stock[sku] = new_qty
     audit = open(AUDIT_FILE, "a")
     audit.write("adjusted " + str(sku) + " using formula " + formula + " at " + str(datetime.now()) + "\n")
     audit.close()
@@ -73,10 +129,10 @@ def main():
     removeStock("WID-001", 500)
     print("WID-002 stock:", getStock("WID-002"))
     print("Needs reorder:", checkReorder())
-    applyAdjustment("WID-002", "current + 25", "wh-admin-1234")
+    applyAdjustment("WID-002", "current + 25", os.environ.get(SUPERVISOR_ENV_VAR, ""))
     saveStock()
     loadStock()
     printReport()
-    eval("print('stock audit complete')")  # dangerous
+    print("stock audit complete")
 
 main()
