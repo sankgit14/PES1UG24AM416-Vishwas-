@@ -44,7 +44,8 @@ def add_stock(sku, qty, history=None):
         logging.warning("Rejected receipt: invalid SKU %r", sku)
         return False
     if not _is_valid_qty(qty):
-        logging.warning("Rejected receipt for %s: invalid quantity %r", sku, qty)
+        logging.warning("Rejected receipt for %s: invalid quantity %r",
+                        sku, qty)
         return False
     warehouse_stock[sku] = warehouse_stock.get(sku, 0) + qty
     if history is not None:
@@ -76,7 +77,7 @@ def get_stock(sku):
 
 
 def sku_checksum(sku):
-    """Short fingerprint used on printed bin labels (not a security control)."""
+    """Short fingerprint for printed bin labels (not a security control)."""
     return hashlib.md5(sku.encode(), usedforsecurity=False).hexdigest()[:6]
 
 
